@@ -17,6 +17,7 @@ from werkzeug.exceptions import NotFound
 from wyze_bridge import WyzeBridge
 from wyzebridge import config, web_ui
 from wyzebridge.auth import WbAuth
+from wyzebridge.video_analysis import VideoAnalysisService
 from wyzebridge.web_ui import url_for
 
 
@@ -29,6 +30,8 @@ def create_app():
         print(ex)
         print("Please ensure your host is up to date.")
         exit()
+    video_analysis = VideoAnalysisService()
+    video_analysis.start()
 
     def auth_required(view):
         @wraps(view)
@@ -252,6 +255,42 @@ def create_app():
         resp = make_response(render_template("m3u8.html", cameras=cameras))
         resp.headers.set("content-type", "application/x-mpegURL")
         return resp
+
+    @app.route("/api/video_analysis")
+    @auth_required
+    def video_analysis_overview():
+        return video_analysis.overview()
+
+    @app.route("/api/video_analysis/scan", methods=["POST"])
+    @auth_required
+    def video_analysis_scan():
+        return video_analysis.trigger_scan()
+
+    @app.route("/api/video_analysis/clips")
+    @auth_required
+    def video_analysis_clips():
+        limit = request.args.get("limit", "50")
+        return video_analysis.list_clips(int(limit) if limit.isdigit() else 50)
+
+    @app.route("/api/video_analysis/clips/<string:clip_id>")
+    @auth_required
+    def video_analysis_clip(clip_id: str):
+        return video_analysis.get_clip(clip_id)
+
+    @app.route("/api/video_analysis/clips/<string:clip_id>/analyze", methods=["POST"])
+    @auth_required
+    def video_analysis_enqueue(clip_id: str):
+        force = request.values.get("force", "").lower() in {"1", "true", "yes"}
+        return video_analysis.enqueue(clip_id, force=force)
+
+    @app.route("/api/video_analysis/clips/<string:clip_id>/prompt", methods=["GET", "POST"])
+    @auth_required
+    def video_analysis_prompt(clip_id: str):
+        question = request.values.get("question", "")
+        if request.is_json and not question:
+            payload = request.get_json(silent=True) or {}
+            question = payload.get("question", "")
+        return video_analysis.answer_prompt(clip_id, question)
 
     return app
 

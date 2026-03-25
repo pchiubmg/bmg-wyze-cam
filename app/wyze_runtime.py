@@ -32,6 +32,7 @@ IMG_DIR = _path_from_env("WB_IMG_DIR", Path("/") / IMG_DIR_NAME if IS_CONTAINER_
 PIPE_DIR = _path_from_env("WB_PIPE_DIR", Path("/tmp") if IS_CONTAINER_LAYOUT else RUNTIME_DIR / "pipes")
 SSL_DIR = _path_from_env("WB_SSL_DIR", Path("/ssl") if IS_CONTAINER_LAYOUT else DATA_DIR / "ssl")
 LOG_DIR = _path_from_env("WB_LOG_DIR", Path("/logs") if IS_CONTAINER_LAYOUT else DATA_DIR / "logs")
+ANALYSIS_DIR = _path_from_env("WB_ANALYSIS_DIR", Path("/analysis") if IS_CONTAINER_LAYOUT else DATA_DIR / "analysis")
 MTX_CONFIG = _path_from_env("WB_MTX_CONFIG", APP_DIR / "mediamtx.yml" if IS_CONTAINER_LAYOUT else RUNTIME_DIR / "mediamtx.yml")
 MTX_EVENT_FILE = _path_from_env(
     "WB_EVENT_FILE",
@@ -42,7 +43,7 @@ MTX_TAG_FILE = _path_from_env("WB_MTX_TAG_FILE", Path("/MTX_TAG") if IS_CONTAINE
 
 
 def ensure_runtime_dirs() -> None:
-    for path in {DATA_DIR, RUNTIME_DIR, BIN_DIR, TOKEN_DIR, IMG_DIR, PIPE_DIR, SSL_DIR, LOG_DIR}:
+    for path in {DATA_DIR, RUNTIME_DIR, BIN_DIR, TOKEN_DIR, IMG_DIR, PIPE_DIR, SSL_DIR, LOG_DIR, ANALYSIS_DIR}:
         path.mkdir(parents=True, exist_ok=True)
 
 

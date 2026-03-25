@@ -77,6 +77,57 @@ The standalone runtime stores tokens, snapshots, MediaMTX config, and other gene
 > [!IMPORTANT]
 > The bundled Wyze/TUTK camera library is Linux-only. On Windows, run the standalone app inside WSL rather than native PowerShell/Python.
 
+### Offline DeepLabCut Analysis
+
+Recorded clips can be analyzed offline with DeepLabCut and queried through prompt-style API calls.
+
+This integration is optional and expects a separate DeepLabCut environment instead of installing DLC into the bridge runtime directly.
+
+1. Create a DeepLabCut environment and install DLC:
+
+```bash
+conda create -n DEEPLABCUT python=3.12
+conda activate DEEPLABCUT
+pip install --pre deeplabcut
+```
+
+2. Configure the bridge with environment variables:
+
+```bash
+DLC_ENABLED=true
+DLC_PROJECT_CONFIG=/absolute/path/to/your/config.yaml
+DLC_PYTHON=/absolute/path/to/your/conda/env/bin/python
+RECORD_ALL=true
+```
+
+Optional:
+
+```bash
+DLC_AUTO_ANALYZE=true
+DLC_CREATE_LABELED_VIDEO=true
+DLC_MIN_FILE_AGE=30
+DLC_SCAN_INTERVAL=60
+DLC_PCUTOFF=0.6
+```
+
+The bridge will scan recorded clips, run DeepLabCut offline, and store results under the runtime analysis directory.
+
+API endpoints:
+
+* `GET /api/video_analysis`
+* `POST /api/video_analysis/scan`
+* `GET /api/video_analysis/clips`
+* `POST /api/video_analysis/clips/<clip_id>/analyze`
+* `POST /api/video_analysis/clips/<clip_id>/prompt`
+
+Example prompts:
+
+* `Summarize this clip`
+* `What bodyparts are tracked?`
+* `Which bodypart moved the most?`
+* `How visible was nose?`
+* `When was tail visible?`
+
 ## What's Changed in v2.10.3
 
 - FIX: Increased `MTX_WRITEQUEUESIZE` to prevent issues with higher bitrates.
