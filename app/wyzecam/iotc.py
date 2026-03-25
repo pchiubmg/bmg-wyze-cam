@@ -2,7 +2,6 @@ import base64
 import contextlib
 import enum
 import errno
-import fcntl
 import hashlib
 import logging
 import os
@@ -12,6 +11,7 @@ import warnings
 from ctypes import CDLL, c_int
 from typing import Any, Iterator, Optional, Union
 
+from wyze_runtime import audio_pipe_path
 from wyzecam.api_models import WyzeAccount, WyzeCamera
 from wyzecam.tutk import tutk, tutk_ioctl_mux, tutk_protocol
 from wyzecam.tutk.tutk_ioctl_mux import TutkIOCtrlMux
@@ -23,6 +23,11 @@ from wyzecam.tutk.tutk_protocol import (
 )
 
 logger = logging.getLogger(__name__)
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 
 class WyzeIOTC:
@@ -556,7 +561,7 @@ class WyzeIOTCSession:
         if pipe_type == "audio" and not self.audio_pipe_ready:
             return
 
-        fifo = f"/tmp/{self.pipe_name}_{pipe_type}.pipe"
+        fifo = str(audio_pipe_path(self.pipe_name, pipe_type))
         size = (round(abs(gap)) * 320) if gap else 7680
 
         try:
@@ -593,7 +598,7 @@ class WyzeIOTCSession:
 
     def recv_audio_pipe(self) -> None:
         """Write raw audio frames to a named pipe."""
-        fifo_path = f"/tmp/{self.pipe_name}_audio.pipe"
+        fifo_path = str(audio_pipe_path(self.pipe_name))
 
         with contextlib.suppress(FileExistsError):
             os.mkfifo(fifo_path)
@@ -831,5 +836,7 @@ class WyzeIOTCSession:
 
 
 def set_non_blocking(fd):
+    if fcntl is None:
+        return
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)

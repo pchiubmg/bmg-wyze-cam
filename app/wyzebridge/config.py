@@ -2,11 +2,13 @@ from os import environ, getenv, makedirs
 from platform import machine
 
 from dotenv import load_dotenv
+from wyze_runtime import APP_DIR, BUILD_DATE_FILE, IMG_DIR, TOKEN_DIR, dir_string, ensure_runtime_dirs
 from wyzebridge.bridge_utils import env_bool, migrate_path, split_int_str
 from wyzebridge.hass import setup_hass
 
-load_dotenv()
-load_dotenv("/.build_date")
+load_dotenv(APP_DIR / ".env")
+load_dotenv(BUILD_DATE_FILE)
+ensure_runtime_dirs()
 
 VERSION: str = f'{getenv("VERSION", "DEV")}'
 ARCH = machine().upper()
@@ -25,8 +27,8 @@ ON_DEMAND: bool = bool(env_bool("on_demand") if getenv("ON_DEMAND") else True)
 CONNECT_TIMEOUT: int = env_bool("CONNECT_TIMEOUT", 20, style="int")
 
 # TODO: change TOKEN_PATH  to /config for all:
-TOKEN_PATH: str = "/config/" if HASS_TOKEN else "/tokens/"
-IMG_PATH: str = f'/{env_bool("IMG_DIR", "img").strip("/")}/'
+TOKEN_PATH: str = "/config/" if HASS_TOKEN else dir_string(TOKEN_DIR)
+IMG_PATH: str = dir_string(IMG_DIR)
 
 SNAPSHOT_TYPE, SNAPSHOT_INT = split_int_str(env_bool("SNAPSHOT"), min=15, default=180)
 SNAPSHOT_FORMAT: str = env_bool("SNAPSHOT_FORMAT", style="original").strip("/")

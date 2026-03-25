@@ -57,6 +57,26 @@ You can then use the web interface at `http://localhost:5050` where `localhost` 
 
 See [basic usage](#basic-usage) for additional information or visit the [wiki page](https://github.com/mrlt8/docker-wyze-bridge/wiki/Home-Assistant) for additional information on using the bridge as a Home Assistant Add-on.
 
+### Standalone (Linux/WSL)
+
+You can now run the bridge without Docker:
+
+```bash
+python3 standalone.py run
+```
+
+On first run, the launcher will:
+
+1. Create a local virtual environment under `.standalone/.venv`
+2. Install the Python requirements from `app/requirements.txt`
+3. Download `mediamtx` and `ffmpeg` into `.standalone/bin`
+4. Start the existing Flask web UI directly from the repo
+
+The standalone runtime stores tokens, snapshots, MediaMTX config, and other generated files under `.standalone/`.
+
+> [!IMPORTANT]
+> The bundled Wyze/TUTK camera library is Linux-only. On Windows, run the standalone app inside WSL rather than native PowerShell/Python.
+
 ## What's Changed in v2.10.3
 
 - FIX: Increased `MTX_WRITEQUEUESIZE` to prevent issues with higher bitrates.

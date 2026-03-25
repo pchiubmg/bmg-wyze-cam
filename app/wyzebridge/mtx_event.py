@@ -2,48 +2,48 @@
 This module handles stream and client events from MediaMTX.
 """
 
-import contextlib
-import errno
-import os
-import select
+from pathlib import Path
 
+from wyze_runtime import MTX_EVENT_FILE, ensure_runtime_dirs
 from wyzebridge.logging import logger
 from wyzebridge.mqtt import update_mqtt_state
 
 
 class RtspEvent:
     """
-    Reads from the `/tmp/mtx_event` named pipe and logs events.
+    Reads appended MediaMTX events from a local runtime file.
     """
 
-    FIFO = "/tmp/mtx_event"
-    __slots__ = "pipe", "streams", "buf"
+    EVENT_FILE = Path(MTX_EVENT_FILE)
+    __slots__ = "streams", "buf", "position"
 
     def __init__(self, streams):
-        self.pipe = 0
         self.streams = streams
         self.buf: str = ""
-        self.open_pipe()
+        self.position = 0
+        self._ensure_file()
+        self.position = self.EVENT_FILE.stat().st_size
 
-    def open_pipe(self):
-        if self.pipe:
-            return
-        with contextlib.suppress(FileExistsError):
-            os.mkfifo(self.FIFO)
-        self.pipe = os.open(self.FIFO, os.O_RDWR | os.O_NONBLOCK)
+    def _ensure_file(self):
+        ensure_runtime_dirs()
+        self.EVENT_FILE.touch(exist_ok=True)
 
     def read(self, timeout: int = 1):
-        self.open_pipe()
+        self._ensure_file()
         try:
-            if select.select([self.pipe], [], [], timeout)[0]:
-                if data := os.read(self.pipe, 128):
-                    self.process_data(data.decode())
+            size = self.EVENT_FILE.stat().st_size
+            if size < self.position:
+                self.position = 0
+            if size == self.position:
+                return
+            with self.EVENT_FILE.open("r", encoding="utf-8", errors="ignore") as event_log:
+                event_log.seek(self.position)
+                data = event_log.read()
+                self.position = event_log.tell()
+            if data:
+                self.process_data(data)
         except OSError as ex:
-            self.pipe = 0
-            if ex.errno != errno.EBADF:
-                logger.error(ex)
-        except Exception as ex:
-            logger.error(f"Error reading from pipe: {ex}")
+            logger.error(ex)
 
     def process_data(self, data):
         messages = data.split("!")
@@ -77,17 +77,17 @@ class RtspEvent:
 
 
 def read_event(camera: str, status: str):
-    msg = f"📕 Client stopped reading from {camera}"
+    msg = f"ðŸ“• Client stopped reading from {camera}"
     if status == "read":
-        msg = f"📖 New client reading from {camera}"
+        msg = f"ðŸ“– New client reading from {camera}"
     logger.info(msg)
 
 
 def ready_event(camera: str, status: str):
-    msg = f"❌ '/{camera}' stream is down"
+    msg = f"âŒ '/{camera}' stream is down"
     state = "disconnected"
     if status == "ready":
-        msg = f"✅ '/{camera} stream is UP! (3/3)"
+        msg = f"âœ… '/{camera} stream is UP! (3/3)"
         state = "online"
 
     update_mqtt_state(camera, state)

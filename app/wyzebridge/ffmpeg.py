@@ -1,9 +1,11 @@
 import os
+import shlex
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from wyze_runtime import FFMPEG_BIN, audio_pipe_path
 from wyzebridge.bridge_utils import LIVESTREAM_PLATFORMS, env_bool, env_cam
 from wyzebridge.config import IMG_PATH, SNAPSHOT_FORMAT
 from wyzebridge.logging import logger
@@ -33,13 +35,15 @@ def get_ffmpeg_cmd(
 
     flags = "-fflags +flush_packets+nobuffer -flags +low_delay"
     livestream = get_livestream_cmd(uri)
-    audio_in = "-f lavfi -i anullsrc=cl=mono" if livestream else ""
+    audio_input = ["-f", "lavfi", "-i", "anullsrc=cl=mono"] if livestream else []
     audio_out = "aac"
     thread_queue = "-thread_queue_size 8 -analyzeduration 32 -probesize 32"
     if audio and "codec" in audio:
         # `Option sample_rate not found.` if we try to specify -ar for aac:
-        rate = "" if audio["codec"] == "aac" else f" -ar {audio['rate']} -ac 1"
-        audio_in = f"{thread_queue} -f {audio['codec']}{rate} -i /tmp/{uri}_audio.pipe"
+        audio_input = thread_queue.split() + ["-f", audio["codec"]]
+        if audio["codec"] != "aac":
+            audio_input += ["-ar", str(audio["rate"]), "-ac", "1"]
+        audio_input += ["-i", str(audio_pipe_path(uri))]
         audio_out = audio["codec_out"] or "copy"
     a_filter = env_bool("AUDIO_FILTER", "volume=5") + ",adelay=0|0"
     a_options = ["-filter:a", a_filter]
@@ -55,26 +59,32 @@ def get_ffmpeg_cmd(
         rtsp_ss += "|" + rss_cmd.format("select=a:") + "_audio"
     h264_enc = env_bool("h264_enc").partition("_")[2]
 
-    cmd = env_cam("FFMPEG_CMD", uri, style="original").format(
-        cam_name=uri, CAM_NAME=uri.upper(), audio_in=audio_in
-    ).split() or (
-        ["-hide_banner", "-loglevel", get_log_level()]
-        + env_cam("FFMPEG_FLAGS", uri, flags).strip("'\"\n ").split()
-        + thread_queue.split()
-        + (["-hwaccel", h264_enc] if h264_enc in {"vaapi", "qsv"} else [])
-        + ["-f", vcodec, "-i", "pipe:0"]
-        + audio_in.split()
-        + ["-map", "0:v", "-c:v"]
-        + re_encode_video(uri, is_vertical)
-        + (["-map", "1:a", "-c:a", audio_out] if audio_in else [])
-        + (a_options if audio and audio_out != "copy" else [])
-        + ["-fps_mode", "passthrough", "-flush_packets", "1"]
-        + ["-rtbufsize", "1", "-copyts", "-copytb", "1"]
-        + ["-f", "tee"]
-        + [rtsp_ss + livestream]
-    )
-    if "ffmpeg" not in cmd[0].lower():
-        cmd.insert(0, "ffmpeg")
+    custom_cmd = env_cam("FFMPEG_CMD", uri, style="original")
+    if custom_cmd:
+        audio_in = shlex.join(audio_input)
+        cmd = shlex.split(
+            custom_cmd.format(cam_name=uri, CAM_NAME=uri.upper(), audio_in=audio_in),
+            posix=os.name != "nt",
+        )
+    else:
+        cmd = (
+            [FFMPEG_BIN, "-hide_banner", "-loglevel", get_log_level()]
+            + env_cam("FFMPEG_FLAGS", uri, flags).strip("'\"\n ").split()
+            + thread_queue.split()
+            + (["-hwaccel", h264_enc] if h264_enc in {"vaapi", "qsv"} else [])
+            + ["-f", vcodec, "-i", "pipe:0"]
+            + audio_input
+            + ["-map", "0:v", "-c:v"]
+            + re_encode_video(uri, is_vertical)
+            + (["-map", "1:a", "-c:a", audio_out] if audio_input else [])
+            + (a_options if audio and audio_out != "copy" else [])
+            + ["-fps_mode", "passthrough", "-flush_packets", "1"]
+            + ["-rtbufsize", "1", "-copyts", "-copytb", "1"]
+            + ["-f", "tee"]
+            + [rtsp_ss + livestream]
+        )
+    if "ffmpeg" not in os.path.basename(cmd[0]).lower():
+        cmd.insert(0, FFMPEG_BIN)
     if env_bool("FFMPEG_LOGLEVEL") in {"info", "verbose", "debug"}:
         logger.info(f"[FFMPEG_CMD] {' '.join(cmd)}")
     return cmd
@@ -159,7 +169,7 @@ def re_encode_video(uri: str, is_vertical: bool) -> list[str]:
 
 def get_livestream_cmd(uri: str) -> str:
 
-    flv = "|[f=flv:flvflags=no_duration_filesize:use_fifo=1:fifo_options=attempt_recovery=1\\\:drop_pkts_on_overflow=1:onfail=abort]"
+    flv = r"|[f=flv:flvflags=no_duration_filesize:use_fifo=1:fifo_options=attempt_recovery=1\\\:drop_pkts_on_overflow=1:onfail=abort]"
 
     for platform, api in LIVESTREAM_PLATFORMS.items():
         key = env_bool(f"{platform}_{uri}", style="original")
@@ -224,7 +234,7 @@ def rtsp_snap_cmd(cam_name: str, interval: bool = False):
         rotation = ["-filter:v", f"{transpose=}"]
 
     return (
-        ["ffmpeg", "-loglevel", "fatal", "-analyzeduration", "0", "-probesize", "32"]
+        [FFMPEG_BIN, "-loglevel", "fatal", "-analyzeduration", "0", "-probesize", "32"]
         + ["-f", "rtsp", "-rtsp_transport", "tcp", "-thread_queue_size", "500"]
         + ["-i", f"rtsp://0.0.0.0:8554/{cam_name}", "-map", "0:v:0"]
         + rotation

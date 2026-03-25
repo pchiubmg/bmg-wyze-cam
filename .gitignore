@@ -4,6 +4,7 @@
 **/totp
 **/.vscode
 **/tokens/
+.standalone/
 *.pickle
 *.env
 *.pyc

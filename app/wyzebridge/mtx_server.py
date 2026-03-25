@@ -1,14 +1,13 @@
-from os import getenv
+import os
+import shlex
 from pathlib import Path
-from signal import SIGKILL
 from subprocess import DEVNULL, Popen
 from typing import Optional
 
 import yaml
+from wyze_runtime import MEDIAMTX_BIN, MTX_CONFIG, MTX_EVENT_FILE, SSL_DIR, ensure_runtime_dirs
 from wyzebridge.bridge_utils import env_bool
 from wyzebridge.logging import logger
-
-MTX_CONFIG = "/app/mediamtx.yml"
 
 RECORD_LENGTH = env_bool("RECORD_LENGTH", "60s")
 RECORD_KEEP = env_bool("RECORD_KEEP", "0s")
@@ -33,11 +32,13 @@ class MtxInterface:
             self._save_config()
 
     def _load_config(self):
-        with open(MTX_CONFIG, "r") as f:
+        ensure_runtime_dirs()
+        Path(MTX_CONFIG).touch(exist_ok=True)
+        with open(MTX_CONFIG, "r", encoding="utf-8") as f:
             self.data = yaml.safe_load(f) or {}
 
     def _save_config(self):
-        with open(MTX_CONFIG, "w") as f:
+        with open(MTX_CONFIG, "w", encoding="utf-8") as f:
             yaml.safe_dump(self.data, f)
 
     def get(self, path: str):
@@ -78,13 +79,14 @@ class MtxServer:
         self._setup_path_defaults()
 
     def _setup_path_defaults(self):
+        ensure_runtime_dirs()
+        Path(MTX_EVENT_FILE).write_text("", encoding="utf-8")
         record_path = RECORD_PATH.format(cam_name="%path", CAM_NAME="%path")
 
         with MtxInterface() as mtx:
             mtx.set("paths", {})
             for event in {"Read", "Unread", "Ready", "NotReady"}:
-                bash_cmd = f"echo $MTX_PATH,{event}! > /tmp/mtx_event;"
-                mtx.set(f"pathDefaults.runOn{event}", f"bash -c '{bash_cmd}'")
+                mtx.set(f"pathDefaults.runOn{event}", event_command(event))
             mtx.set("pathDefaults.runOnDemandStartTimeout", "30s")
             mtx.set("pathDefaults.runOnDemandCloseAfter", "60s")
             mtx.set("pathDefaults.recordPath", record_path)
@@ -113,9 +115,8 @@ class MtxServer:
     def add_path(self, uri: str, on_demand: bool = True):
         with MtxInterface() as mtx:
             if on_demand:
-                cmd = f"bash -c 'echo $MTX_PATH,{{}}! > /tmp/mtx_event'"
-                mtx.set(f"paths.{uri}.runOnDemand", cmd.format("start"))
-                mtx.set(f"paths.{uri}.runOnUnDemand", cmd.format("stop"))
+                mtx.set(f"paths.{uri}.runOnDemand", event_command("start"))
+                mtx.set(f"paths.{uri}.runOnUnDemand", event_command("stop"))
             else:
                 mtx.set(f"paths.{uri}", {})
 
@@ -136,15 +137,15 @@ class MtxServer:
     def start(self):
         if self.sub_process:
             return
-        logger.info(f"[MTX] starting MediaMTX {getenv('MTX_TAG')}")
-        self.sub_process = Popen(["/app/mediamtx", "/app/mediamtx.yml"])
+        logger.info(f"[MTX] starting MediaMTX {os.getenv('MTX_TAG')}")
+        self.sub_process = Popen([MEDIAMTX_BIN, str(MTX_CONFIG)])
 
     def stop(self):
         if not self.sub_process:
             return
         if self.sub_process.poll() is None:
             logger.info("[MTX] Stopping MediaMTX...")
-            self.sub_process.send_signal(SIGKILL)
+            self.sub_process.kill()
             self.sub_process.communicate()
         self.sub_process = None
 
@@ -184,7 +185,8 @@ class MtxServer:
                 mtx.set("hlsServerCert", cert)
                 return
 
-            cert_path = f"{token_path}hls_server"
+            cert_root = Path(token_path) if token_path else SSL_DIR
+            cert_path = str(cert_root / "hls_server")
             generate_certificates(cert_path)
             mtx.set("hlsServerKey", f"{cert_path}.key")
             mtx.set("hlsServerCert", f"{cert_path}.crt")
@@ -192,7 +194,9 @@ class MtxServer:
 
 def mtx_version() -> str:
     try:
-        with open("/MTX_TAG", "r") as tag:
+        from wyze_runtime import MTX_TAG_FILE
+
+        with open(MTX_TAG_FILE, "r", encoding="utf-8") as tag:
             return tag.read().strip()
     except FileNotFoundError:
         return ""
@@ -208,7 +212,7 @@ def generate_certificates(cert_path):
         ).wait()
     if not Path(f"{cert_path}.crt").is_file():
         logger.info("[MTX] 🔏 Generating certificate for LL-HLS")
-        dns = getenv("SUBJECT_ALT_NAME")
+        dns = os.getenv("SUBJECT_ALT_NAME")
         Popen(
             ["openssl", "req", "-new", "-x509", "-sha256"]
             + ["-key", f"{cert_path}.key"]
@@ -219,6 +223,15 @@ def generate_certificates(cert_path):
             stdout=DEVNULL,
             stderr=DEVNULL,
         ).wait()
+
+
+def event_command(event: str) -> str:
+    if os.name == "nt":
+        event_path = str(MTX_EVENT_FILE).replace("/", "\\")
+        return f'cmd /V:ON /C "(echo !MTX_PATH!,{event}!>>\\"{event_path}\\")"'
+
+    event_path = shlex.quote(str(MTX_EVENT_FILE))
+    return f'sh -c "printf \'%s,{event}!\' \\"$MTX_PATH\\" >> {event_path}"'
 
 
 def parse_auth(auth: str) -> list[dict[str, str]]:
