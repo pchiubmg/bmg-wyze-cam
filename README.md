@@ -59,39 +59,66 @@ See [basic usage](#basic-usage) for additional information or visit the [wiki pa
 
 ### Standalone (Linux/WSL)
 
-You can now run the bridge without Docker:
+You can now run the bridge directly from the repo without Docker.
+
+Quick health check:
+
+```bash
+python3 standalone.py doctor
+```
+
+Bootstrap the local runtime:
+
+```bash
+python3 standalone.py bootstrap
+```
+
+Start the app:
 
 ```bash
 python3 standalone.py run
 ```
 
-On first run, the launcher will:
+Or use the launcher script:
+
+```bash
+./start-standalone.sh
+```
+
+The standalone launcher will:
 
 1. Create a local virtual environment under `.standalone/.venv`
 2. Install the Python requirements from `app/requirements.txt`
 3. Download `mediamtx` and `ffmpeg` into `.standalone/bin`
 4. Start the existing Flask web UI directly from the repo
 
-The standalone runtime stores tokens, snapshots, MediaMTX config, and other generated files under `.standalone/`.
+Repo-local runtime files are stored under `.standalone/`:
+
+* `.standalone/bin/` for downloaded binaries
+* `.standalone/tokens/` for auth/session data
+* `.standalone/img/` for snapshots
+* `.standalone/runtime/` for MediaMTX config and runtime files
+* `.standalone/analysis/` for offline video analysis results
+
+Advanced users can override those paths with `WB_*` environment variables such as `WB_DATA_DIR`, `WB_BIN_DIR`, `WB_IMG_DIR`, `WB_TOKEN_DIR`, `WB_RUNTIME_DIR`, and `WB_ANALYSIS_DIR`.
 
 > [!IMPORTANT]
 > The bundled Wyze/TUTK camera library is Linux-only. On Windows, run the standalone app inside WSL rather than native PowerShell/Python.
 
 ### Offline DeepLabCut Analysis
 
-Recorded clips can be analyzed offline with DeepLabCut and queried through prompt-style API calls.
+Recorded clips can be analyzed offline with DeepLabCut and then queried through prompt-style API calls.
 
-This integration is optional and expects a separate DeepLabCut environment instead of installing DLC into the bridge runtime directly.
+This integration is optional and expects a separate DeepLabCut Python environment instead of installing DLC into the bridge runtime directly.
 
-1. Create a DeepLabCut environment and install DLC:
+1. Create or reuse a working DeepLabCut environment.
 
 ```bash
-conda create -n DEEPLABCUT python=3.12
 conda activate DEEPLABCUT
-pip install --pre deeplabcut
+pip install deeplabcut
 ```
 
-2. Configure the bridge with environment variables:
+2. Enable recording and point the bridge at your DeepLabCut project:
 
 ```bash
 DLC_ENABLED=true
@@ -100,7 +127,9 @@ DLC_PYTHON=/absolute/path/to/your/conda/env/bin/python
 RECORD_ALL=true
 ```
 
-Optional:
+Instead of `RECORD_ALL=true`, you can enable recording per camera with `RECORD_<CAM_NAME>=true`.
+
+Optional analysis settings:
 
 ```bash
 DLC_AUTO_ANALYZE=true
@@ -108,15 +137,30 @@ DLC_CREATE_LABELED_VIDEO=true
 DLC_MIN_FILE_AGE=30
 DLC_SCAN_INTERVAL=60
 DLC_PCUTOFF=0.6
+DLC_VIDEO_ROOT=/absolute/path/to/recordings
 ```
 
-The bridge will scan recorded clips, run DeepLabCut offline, and store results under the runtime analysis directory.
+How it works:
+
+1. The bridge scans recorded clips from `RECORD_PATH` or `DLC_VIDEO_ROOT`
+2. New clips are queued after they are old enough to avoid partial writes
+3. DeepLabCut runs on each clip in the external DLC environment
+4. Results are saved per clip with summaries that the prompt API can use
+
+Analysis outputs are written under the runtime analysis directory, one folder per clip, including:
+
+* `result.json`
+* `summary.json`
+* DeepLabCut `.csv` output
+* DeepLabCut `.h5` output when generated
+* labeled video output when `DLC_CREATE_LABELED_VIDEO=true`
 
 API endpoints:
 
 * `GET /api/video_analysis`
 * `POST /api/video_analysis/scan`
 * `GET /api/video_analysis/clips`
+* `GET /api/video_analysis/clips/<clip_id>`
 * `POST /api/video_analysis/clips/<clip_id>/analyze`
 * `POST /api/video_analysis/clips/<clip_id>/prompt`
 
@@ -127,6 +171,17 @@ Example prompts:
 * `Which bodypart moved the most?`
 * `How visible was nose?`
 * `When was tail visible?`
+
+Example prompt call:
+
+```bash
+curl -X POST http://localhost:5000/api/video_analysis/clips/<clip_id>/prompt \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Which bodypart moved the most?"}'
+```
+
+> [!NOTE]
+> The current prompt layer is pose-summary based. It answers structured questions about tracked bodyparts, movement, confidence, and visibility windows. It is not a general-purpose video language model.
 
 ## What's Changed in v2.10.3
 
